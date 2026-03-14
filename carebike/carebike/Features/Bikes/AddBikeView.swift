@@ -117,28 +117,38 @@ struct AddBikeView: View {
     }
     
     private func saveBike() {
-        let bicycle = Bicycle(
-            name: name.trimmingCharacters(in: .whitespaces),
-            brand: brand.trimmingCharacters(in: .whitespaces),
-            model: model.trimmingCharacters(in: .whitespaces),
-            year: year,
-            bikeType: bikeType,
-            purchasePrice: Double(purchasePrice) ?? 0
-        )
-        
-        if addDefaultComponents {
-            for componentType in bikeType.defaultComponents {
-                let component = Component(
-                    name: componentType.rawValue,
-                    componentType: componentType
+        Task { @MainActor in
+            do {
+                let bicycle = Bicycle(
+                    name: name.trimmingCharacters(in: .whitespaces),
+                    brand: brand.trimmingCharacters(in: .whitespaces),
+                    model: model.trimmingCharacters(in: .whitespaces),
+                    year: year,
+                    bikeType: bikeType,
+                    purchasePrice: Double(purchasePrice) ?? 0
                 )
-                component.bicycle = bicycle
-                modelContext.insert(component)
+                
+                // 先插入自行车，确保它在上下文中
+                modelContext.insert(bicycle)
+                
+                if addDefaultComponents {
+                    for componentType in bikeType.defaultComponents {
+                        let component = Component(
+                            name: componentType.rawValue,
+                            componentType: componentType
+                        )
+                        component.bicycle = bicycle
+                        modelContext.insert(component)
+                    }
+                }
+                
+                // 显式保存所有更改
+                try modelContext.save()
+                dismiss()
+            } catch {
+                print("Error saving bike: \(error)")
             }
         }
-        
-        modelContext.insert(bicycle)
-        dismiss()
     }
 }
 

@@ -45,7 +45,10 @@ struct AddComponentView: View {
                 }
             }
             .onAppear {
-                selectedBicycle = bicycle ?? bicycles.first
+                // 只在首次加载时初始化，避免从Picker返回时重置数据
+                if selectedBicycle == nil {
+                    selectedBicycle = bicycle ?? bicycles.first
+                }
             }
         }
     }
@@ -119,22 +122,33 @@ struct AddComponentView: View {
     }
     
     private func saveComponent() {
-        let component = Component(
-            name: name.trimmingCharacters(in: .whitespaces),
-            componentType: componentType,
-            maxDistance: Double(maxDistance),
-            purchasePrice: Double(purchasePrice) ?? 0
-        )
-        
-        component.brand = brand.trimmingCharacters(in: .whitespaces)
-        component.model = model.trimmingCharacters(in: .whitespaces)
-        
-        if let bike = selectedBicycle {
-            component.bicycle = bike
+        Task { @MainActor in
+            do {
+                let component = Component(
+                    name: name.trimmingCharacters(in: .whitespaces),
+                    componentType: componentType,
+                    maxDistance: Double(maxDistance),
+                    purchasePrice: Double(purchasePrice) ?? 0
+                )
+                
+                component.brand = brand.trimmingCharacters(in: .whitespaces)
+                component.model = model.trimmingCharacters(in: .whitespaces)
+                
+                if let bike = selectedBicycle {
+                    // 验证自行车在当前上下文中有效
+                    if bike.modelContext == nil {
+                        print("Warning: Selected bicycle is not in the current model context")
+                    }
+                    component.bicycle = bike
+                }
+                
+                modelContext.insert(component)
+                try modelContext.save()
+                dismiss()
+            } catch {
+                print("Error saving component: \(error)")
+            }
         }
-        
-        modelContext.insert(component)
-        dismiss()
     }
 }
 

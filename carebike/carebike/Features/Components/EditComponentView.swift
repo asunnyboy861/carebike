@@ -116,17 +116,33 @@ struct EditComponentView: View {
     }
     
     private func saveChanges() {
-        component.name = name.trimmingCharacters(in: .whitespaces)
-        component.componentType = componentType
-        component.brand = brand.trimmingCharacters(in: .whitespaces)
-        component.model = model.trimmingCharacters(in: .whitespaces)
-        component.maxDistance = Double(maxDistance) ?? component.maxDistance
-        component.purchasePrice = Double(purchasePrice) ?? component.purchasePrice
-        component.currentDistance = Double(currentDistance) ?? component.currentDistance
-        component.isActive = isActive
-        component.updateHealthStatus()
-        
-        dismiss()
+        Task { @MainActor in
+            do {
+                // 验证组件在当前上下文中有效
+                if component.modelContext == nil {
+                    print("Warning: Component is not in the current model context")
+                }
+                
+                component.name = name.trimmingCharacters(in: .whitespaces)
+                component.componentType = componentType
+                component.brand = brand.trimmingCharacters(in: .whitespaces)
+                component.model = model.trimmingCharacters(in: .whitespaces)
+                component.maxDistance = Double(maxDistance) ?? component.maxDistance
+                component.purchasePrice = Double(purchasePrice) ?? component.purchasePrice
+                component.currentDistance = Double(currentDistance) ?? component.currentDistance
+                component.isActive = isActive
+                component.updateHealthStatus()
+                
+                // 显式保存上下文
+                if let context = component.modelContext {
+                    try context.save()
+                }
+                
+                dismiss()
+            } catch {
+                print("Error saving component changes: \(error)")
+            }
+        }
     }
 }
 

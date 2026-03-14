@@ -1,40 +1,51 @@
 import SwiftUI
 import SwiftData
 
-struct AddMaintenanceView: View {
+struct EditMaintenanceView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     
-    var bicycle: Bicycle?
-    var component: Component?
+    @Bindable var event: MaintenanceEvent
     
-    @State private var title = ""
-    @State private var maintenanceType: MaintenanceType = .routine
-    @State private var description = ""
-    @State private var cost = ""
-    @State private var distance = ""
-    @State private var isScheduled = false
-    @State private var scheduledDate = Date()
-    @State private var notes = ""
+    @State private var title: String
+    @State private var maintenanceType: MaintenanceType
+    @State private var description: String
+    @State private var cost: String
+    @State private var distance: String
+    @State private var isScheduled: Bool
+    @State private var scheduledDate: Date
+    @State private var isCompleted: Bool
+    @State private var notes: String
     @State private var selectedBicycle: Bicycle?
     @State private var selectedComponent: Component?
     
     @Query(sort: \Bicycle.name) private var bicycles: [Bicycle]
     
-    init(bicycle: Bicycle? = nil, component: Component? = nil) {
-        self.bicycle = bicycle
-        self.component = component
+    init(event: MaintenanceEvent) {
+        self.event = event
+        _title = State(initialValue: event.title)
+        _maintenanceType = State(initialValue: event.maintenanceType)
+        _description = State(initialValue: event.maintenanceDescription ?? "")
+        _cost = State(initialValue: String(event.cost))
+        _distance = State(initialValue: String(event.distance))
+        _isScheduled = State(initialValue: event.isScheduled)
+        _scheduledDate = State(initialValue: event.scheduledDate ?? Date())
+        _isCompleted = State(initialValue: event.isCompleted)
+        _notes = State(initialValue: event.notes ?? "")
+        _selectedBicycle = State(initialValue: event.bicycle)
+        _selectedComponent = State(initialValue: event.component)
     }
     
     var body: some View {
         NavigationStack {
             Form {
                 basicInfoSection
+                statusSection
                 costSection
                 schedulingSection
                 bikeSelectionSection
             }
-            .navigationTitle("Log Maintenance")
+            .navigationTitle("Edit Maintenance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -45,7 +56,7 @@ struct AddMaintenanceView: View {
                 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
-                        saveMaintenance()
+                        saveChanges()
                     }
                     .disabled(!isValid)
                 }
@@ -53,10 +64,10 @@ struct AddMaintenanceView: View {
             .onAppear {
                 // 只在首次加载时初始化，避免从Picker返回时重置数据
                 if selectedBicycle == nil {
-                    selectedBicycle = bicycle ?? bicycles.first
+                    selectedBicycle = event.bicycle ?? bicycles.first
                 }
-                if selectedComponent == nil && component != nil {
-                    selectedComponent = component
+                if selectedComponent == nil {
+                    selectedComponent = event.component
                 }
             }
             .onChange(of: selectedBicycle) { oldBike, newBike in
@@ -94,6 +105,23 @@ struct AddMaintenanceView: View {
         }
     }
     
+    private var statusSection: some View {
+        Section {
+            Toggle("Completed", isOn: $isCompleted)
+            
+            if isCompleted {
+                HStack {
+                    Text("Completion Date")
+                    Spacer()
+                    Text(event.date.formatted(date: .abbreviated, time: .omitted))
+                        .foregroundColor(.secondary)
+                }
+            }
+        } header: {
+            Text("Status")
+        }
+    }
+    
     private var costSection: some View {
         Section {
             HStack {
@@ -120,7 +148,7 @@ struct AddMaintenanceView: View {
     
     private var schedulingSection: some View {
         Section {
-            Toggle("Schedule for later", isOn: $isScheduled)
+            Toggle("Scheduled maintenance", isOn: $isScheduled)
             
             if isScheduled {
                 DatePicker(
@@ -134,8 +162,6 @@ struct AddMaintenanceView: View {
                 .lineLimit(2...4)
         } header: {
             Text("Scheduling")
-        } footer: {
-            Text("Scheduled maintenance will send you a reminder notification")
         }
     }
     
@@ -180,64 +206,79 @@ struct AddMaintenanceView: View {
         !title.trimmingCharacters(in: .whitespaces).isEmpty
     }
     
-    private func saveMaintenance() {
+    private func saveChanges() {
         Task { @MainActor in
             do {
-                let event = MaintenanceEvent(
-                    title: title.trimmingCharacters(in: .whitespaces),
-                    maintenanceType: maintenanceType,
-                    cost: Double(cost) ?? 0,
-                    distance: Double(distance) ?? 0
-                )
+                // 计算成本差异，更新自行车总维护成本
+                let oldCost = event.cost
+                let newCost = Double(cost) ?? 0
+                let costDifference = newCost - oldCost
                 
+                // 更新事件属性
+                event.title = title.trimmingCharacters(in: .whitespaces)
+                event.maintenanceType = maintenanceType
                 event.maintenanceDescription = description.trimmingCharacters(in: .whitespaces)
-                event.notes = notes.trimmingCharacters(in: .whitespaces)
+                event.cost = newCost
+                event.distance = Double(distance) ?? 0
                 event.isScheduled = isScheduled
                 event.scheduledDate = isScheduled ? scheduledDate : nil
+                event.isCompleted = isCompleted
+                event.notes = notes.trimmingCharacters(in: .whitespaces)
                 
-                // 验证自行车和组件的关联关系
+                // 如果标记为完成且之前未完成，更新完成日期
+                if isCompleted && !event.isCompleted {
+                    event.date = Date()
+                }
+                
+                // 更新自行车关联
                 if let bike = selectedBicycle {
-                    // 确保自行车在当前上下文中有效
-                    if bike.modelContext == nil {
-                        print("Warning: Selected bicycle is not in the current model context")
+                    // 如果自行车改变了，调整成本
+                    if event.bicycle?.id != bike.id {
+                        // 从旧自行车减去成本
+                        if let oldBike = event.bicycle {
+                            oldBike.totalMaintenanceCost -= oldCost
+                        }
+                        // 添加到新自行车
+                        bike.totalMaintenanceCost += newCost
+                        event.bicycle = bike
+                    } else {
+                        // 同一自行车，只更新成本差异
+                        bike.totalMaintenanceCost += costDifference
                     }
-                    
-                    event.bicycle = bike
-                    bike.totalMaintenanceCost += event.cost
                     
                     if !isScheduled {
                         bike.lastMaintenanceDate = Date()
                     }
-                    
-                    // 验证组件是否属于选中的自行车
-                    if let comp = selectedComponent {
-                        let isComponentValid = bike.components?.contains(where: { $0.id == comp.id }) ?? false
-                        
-                        if isComponentValid {
-                            event.component = comp
-                            if !isScheduled {
-                                comp.lastMaintenanceDate = Date()
-                            }
-                        } else {
-                            print("Warning: Selected component does not belong to the selected bicycle")
-                        }
+                } else {
+                    // 如果没有选择自行车，从旧自行车减去成本
+                    if let oldBike = event.bicycle {
+                        oldBike.totalMaintenanceCost -= oldCost
+                        event.bicycle = nil
                     }
                 }
                 
-                modelContext.insert(event)
+                // 更新组件关联
+                if let comp = selectedComponent {
+                    event.component = comp
+                    if !isScheduled {
+                        comp.lastMaintenanceDate = Date()
+                    }
+                } else {
+                    event.component = nil
+                }
                 
-                // 尝试保存上下文
+                // 显式保存上下文
                 try modelContext.save()
                 
                 dismiss()
             } catch {
-                print("Error saving maintenance event: \(error)")
-                // 可以在这里添加错误提示UI
+                print("Error saving maintenance changes: \(error)")
             }
         }
     }
 }
 
 #Preview {
-    AddMaintenanceView()
+    EditMaintenanceView(event: MaintenanceEvent(title: "Test", maintenanceType: .routine))
+        .modelContainer(PersistenceController(inMemory: true).container)
 }

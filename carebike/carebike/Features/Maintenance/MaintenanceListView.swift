@@ -6,7 +6,11 @@ struct MaintenanceListView: View {
     @Query(sort: \MaintenanceEvent.date, order: .reverse) private var maintenanceEvents: [MaintenanceEvent]
     
     @State private var showingAddMaintenance = false
+    @State private var showingEditMaintenance = false
+    @State private var selectedEvent: MaintenanceEvent?
     @State private var filter: MaintenanceFilter = .all
+    @State private var showingDeleteConfirmation = false
+    @State private var eventToDelete: MaintenanceEvent?
     
     var body: some View {
         NavigationStack {
@@ -28,6 +32,21 @@ struct MaintenanceListView: View {
             .sheet(isPresented: $showingAddMaintenance) {
                 AddMaintenanceView()
             }
+            .sheet(isPresented: $showingEditMaintenance) {
+                if let event = selectedEvent {
+                    EditMaintenanceView(event: event)
+                }
+            }
+            .alert("Delete Maintenance Record?", isPresented: $showingDeleteConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    if let event = eventToDelete {
+                        deleteEvent(event)
+                    }
+                }
+            } message: {
+                Text("This action cannot be undone. The maintenance record will be permanently deleted.")
+            }
         }
     }
     
@@ -44,9 +63,76 @@ struct MaintenanceListView: View {
             
             ForEach(filteredEvents) { event in
                 MaintenanceListRow(event: event)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectedEvent = event
+                        showingEditMaintenance = true
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            eventToDelete = event
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        
+                        Button {
+                            selectedEvent = event
+                            showingEditMaintenance = true
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        if !event.isCompleted {
+                            Button {
+                                markAsCompleted(event)
+                            } label: {
+                                Label("Complete", systemImage: "checkmark")
+                            }
+                            .tint(.green)
+                        }
+                    }
             }
         }
         .listStyle(.insetGrouped)
+    }
+    
+    private func markAsCompleted(_ event: MaintenanceEvent) {
+        Task { @MainActor in
+            do {
+                event.isCompleted = true
+                event.date = Date()
+                
+                if let bike = event.bicycle {
+                    bike.lastMaintenanceDate = Date()
+                }
+                if let comp = event.component {
+                    comp.lastMaintenanceDate = Date()
+                }
+                
+                try modelContext.save()
+            } catch {
+                print("Error marking maintenance as completed: \(error)")
+            }
+        }
+    }
+    
+    private func deleteEvent(_ event: MaintenanceEvent) {
+        Task { @MainActor in
+            do {
+                // 从自行车总成本中减去
+                if let bike = event.bicycle {
+                    bike.totalMaintenanceCost -= event.cost
+                }
+                
+                modelContext.delete(event)
+                try modelContext.save()
+            } catch {
+                print("Error deleting maintenance event: \(error)")
+            }
+        }
     }
     
     private var filteredEvents: [MaintenanceEvent] {

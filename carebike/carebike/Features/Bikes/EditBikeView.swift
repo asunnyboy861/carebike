@@ -116,14 +116,30 @@ struct EditBikeView: View {
     }
     
     private func saveChanges() {
-        bicycle.name = name.trimmingCharacters(in: .whitespaces)
-        bicycle.brand = brand.trimmingCharacters(in: .whitespaces)
-        bicycle.model = model.trimmingCharacters(in: .whitespaces)
-        bicycle.year = year
-        bicycle.bikeType = bikeType
-        bicycle.purchasePrice = Double(purchasePrice) ?? bicycle.purchasePrice
-        
-        dismiss()
+        Task { @MainActor in
+            do {
+                // 验证自行车在当前上下文中有效
+                if bicycle.modelContext == nil {
+                    print("Warning: Bicycle is not in the current model context")
+                }
+                
+                bicycle.name = name.trimmingCharacters(in: .whitespaces)
+                bicycle.brand = brand.trimmingCharacters(in: .whitespaces)
+                bicycle.model = model.trimmingCharacters(in: .whitespaces)
+                bicycle.year = year
+                bicycle.bikeType = bikeType
+                bicycle.purchasePrice = Double(purchasePrice) ?? bicycle.purchasePrice
+                
+                // 显式保存上下文
+                if let context = bicycle.modelContext {
+                    try context.save()
+                }
+                
+                dismiss()
+            } catch {
+                print("Error saving bike changes: \(error)")
+            }
+        }
     }
 }
 
